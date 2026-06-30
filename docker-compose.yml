@@ -1,0 +1,63 @@
+# Colony — full stack (self-contained). Postgres (pgvector) + MinIO + backend + frontend.
+#
+#   docker compose up -d        # then open http://localhost:3022
+#
+# Infra (postgres + minio) is pulled in via include; the bundled DB/object-store keep
+# their own volumes, so this stack runs with its own data — you only add an LLM provider
+# key in the UI after first login. Needs Docker Compose v2.20+ (for `include`).
+#
+# To run against your own managed Postgres/S3 instead, use docker-compose.app.yml.
+
+include:
+  - docker-compose.infra.yml
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: colony-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      # Bundled infra wins over .env — the full stack always uses its own postgres/minio.
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/colony
+      S3_ENDPOINT_URL: http://minio:9000
+      # presigned URL 用「浏览器可达」端点签名（后端用内网名 minio:9000 直连，但浏览器打不开它）。
+      # bundled MinIO 默认映射宿主 9000；若用 override 改了端口（如 19000），在 override 里覆盖此值。
+      S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}
+      # ADR-023 · S3 凭据必须随 endpoint 一起对齐 bundled MinIO（root user/password=minioadmin）。
+      # 否则 endpoint 指本地 MinIO 却用 .env 的远程 key → InvalidAccessKeyId（后台 500）。
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_FORCE_PATH_STYLE: "true"
+    ports:
+      - "9022:9022"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    # --no-sync: run in the image's already-built frozen env; never hit PyPI at boot.
+    command: >
+      sh -c "uv run --no-sync alembic upgrade head &&
+             uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 9022"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Baked into the standalone /api-proxy rewrite at build time (see frontend/Dockerfile).
+        BACKEND_URL: http://backend:9022
+    container_name: colony-frontend
+    restart: unless-stopped
+    environment:
+      # Browser hits same-origin /api; Next proxies it server-side to the backend service.
+      BACKEND_URL: http://backend:9022
+      NEXT_PUBLIC_STREAM_BASE_URL: ""
+    ports:
+      - "3022:3022"
+    depends_on:
+      - backend

@@ -1,0 +1,18 @@
+# ── Build & Run ──
+FROM docker-registry.qiyi.virtual/library/node:20-iqiyi-4
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+COPY . .
+# .env.test 作为生产环境变量文件
+COPY .env.test .env.production
+RUN npm run build && \
+    cp -r .next/static .next/standalone/.next/static
+
+ENV NODE_ENV=production
+EXPOSE 3000
+
+CMD ["node", ".next/standalone/server.js"]

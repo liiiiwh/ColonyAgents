@@ -1,0 +1,41 @@
+# Python / uv
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/.mypy_cache/
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.vercel/
+frontend/*.log
+frontend/*.tsbuildinfo
+
+# Colony runtime data
+backend/uploads/
+backend/storage/
+runtime/
+
+# 环境变量
+**/.env
+**/.env.local
+**/.env.*.local
+!**/.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker 数据卷
+docker-data/
+.understand-anything/

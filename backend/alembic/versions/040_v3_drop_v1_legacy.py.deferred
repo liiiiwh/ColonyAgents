@@ -1,0 +1,68 @@
+"""v3 物理清理 v1 遗留（R1 / R12 / R15）。
+
+⚠️  **后置迁移**：仅在 v3 已稳定运行 ≥ 2-4 周、所有 v1 项目已重建 / 废弃后执行。
+
+操作：
+1. 删除所有 `workflow_config->>'deprecated_at'` 非空的老 project + 其 ProjectNode
+2. DROP TABLE project_nodes
+3. DROP COLUMN projects.auto_approve（v3 用 capability_contract.requires_approval）
+4. DROP COLUMN projects.context_compression_threshold（v3 用 projects.compression_config JSONB / 平台 system_settings）
+
+回滚：本迁移不可逆（数据物理删除）。请在 E2E 完整验收并备份 DB 后再跑。
+"""
+from __future__ import annotations
+
+from alembic import op
+
+
+# revision identifiers
+revision = "040_v3_drop_v1_legacy"
+down_revision = "042_super_pending_messages"
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    # ── Step 1：物理删除已 deprecated 的老 project（CASCADE 清 ProjectNode / sessions） ──
+    # 仅删 workflow_config.deprecated_at 非空（admin 在前端 mark 过的）
+    op.execute("""
+        DELETE FROM projects
+         WHERE workflow_config ? 'deprecated_at'
+           AND workflow_config->>'deprecated_at' IS NOT NULL
+    """)
+
+    # ── Step 2：DROP project_nodes 表（v3 super-worker 模型不再使用） ──
+    # 防御：若还有引用则先报错，避免误删
+    op.execute("""
+        DO $$
+        DECLARE n_remaining INT;
+        BEGIN
+            SELECT COUNT(*) INTO n_remaining FROM project_nodes;
+            IF n_remaining > 0 THEN
+                RAISE EXCEPTION '还有 % 个 project_nodes 未清理；请先把所有项目迁到 v3 或 mark deprecated_at', n_remaining;
+            END IF;
+        END $$;
+    """)
+    op.execute("DROP TABLE IF EXISTS project_nodes CASCADE")
+
+    # ── Step 3：DROP projects.auto_approve（v3 用 capability_contract.requires_approval） ──
+    op.execute("ALTER TABLE projects DROP COLUMN IF EXISTS auto_approve")
+
+    # ── Step 4：DROP projects.context_compression_threshold（v3 三级 compression_config） ──
+    # 数据迁移：把非默认值搬到 compression_config.threshold_tokens
+    op.execute("""
+        UPDATE projects
+           SET compression_config = COALESCE(compression_config, '{}'::jsonb)
+                || jsonb_build_object('threshold_tokens', context_compression_threshold)
+         WHERE context_compression_threshold IS NOT NULL
+           AND context_compression_threshold != 300000
+           AND (compression_config IS NULL OR NOT (compression_config ? 'threshold_tokens'))
+    """)
+    op.execute("ALTER TABLE projects DROP COLUMN IF EXISTS context_compression_threshold")
+
+
+def downgrade() -> None:
+    # 本迁移不可逆（DROP TABLE + DELETE 物理）；保留空占位以满足 alembic
+    raise NotImplementedError(
+        "040 是终态清理，不可回退。如需恢复 v1 ProjectNode 请从备份 restore。"
+    )

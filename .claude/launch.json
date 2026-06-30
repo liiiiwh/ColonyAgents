@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "colony-frontend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-lc", "cd /Users/wenhuali/www/colony/frontend && BACKEND_URL=http://localhost:9022 NEXT_PUBLIC_STREAM_BASE_URL=http://localhost:9022 npx next dev -p $PORT"],
+      "port": 3022,
+      "autoPort": true
+    }
+  ]
+}
